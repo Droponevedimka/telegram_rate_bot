@@ -3,8 +3,7 @@ import fs from 'fs';
 const PINNED_MESSAGE_FILE = './statePinnedID.txt';
 
 // Function to save PINNED_MESSAGE_ID and timestamp to a file
-export function savePinnedMessageState(messageId, timestamp) {
-  const state = { messageId, timestamp };
+export function savePinnedMessageState(state) {
   fs.writeFileSync(PINNED_MESSAGE_FILE, JSON.stringify(state), 'utf8');
 }
 

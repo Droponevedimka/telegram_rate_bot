@@ -25,6 +25,11 @@ async function updatePinnedMessage() {
   const pinnedMessageState = loadPinnedMessageState();
   const currentTime = new Date().getTime();
 
+  if (pinnedMessageState.lastCountRates == countRates) {
+    console.log('Курс не изменился обновлять нет смысла');
+    return null;
+  }
+
   if (
     pinnedMessageState?.timestamp &&
     isMessageExpired(pinnedMessageState.timestamp)
@@ -54,6 +59,13 @@ async function updatePinnedMessage() {
           },
         }
       );
+
+      // Save the new message ID and timestamp
+      savePinnedMessageState({
+        messageId: pinnedMessageState.message_id,
+        timestamp: pinnedMessageState.timestamp,
+        lastCountRates: countRates,
+      });
       console.log('Pinned message updated.');
     } catch (error) {
       console.error('Error updating the pinned message:', error);
@@ -77,7 +89,11 @@ async function updatePinnedMessage() {
       });
 
       // Save the new message ID and timestamp
-      savePinnedMessageState(message.message_id, currentTime);
+      savePinnedMessageState({
+        messageId: message.message_id,
+        timestamp: currentTime,
+        lastCountRates: countRates,
+      });
       console.log('New message sent and pinned.');
     } catch (error) {
       console.error('Error sending or pinning message:', error);
