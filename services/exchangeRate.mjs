@@ -39,11 +39,11 @@ async function updatePinnedMessage() {
 
   const exhcangeMessage = `Текущий курс ${exchangeRates} по цб [Яндекс конвертёр](https://ya.ru/search/?text=%D0%BA%D1%83%D1%80%D1%81+%D0%B4%D0%BE%D0%BB%D0%BB%D0%B0%D1%80%D0%B0+%D0%BA+%D1%80%D1%83%D0%B1%D0%BB%D1%8E)`;
 
-  if (pinnedMessageState?.PINNED_MESSAGE_ID) {
+  if (pinnedMessageState?.messageId) {
     try {
       await bot.telegram.editMessageText(
         TARGET_CHAT_ID,
-        pinnedMessageState.PINNED_MESSAGE_ID,
+        pinnedMessageState.messageId,
         null,
         exhcangeMessage,
         {
