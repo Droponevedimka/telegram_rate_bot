@@ -9,7 +9,7 @@ async function getExchangeRates() {
     const res = 1 / rates.rates.USD;
     const countRates = res.toFixed(2);
     return {
-      exchangeRates: '1\\$ \\= ' + countRates.replace('.', ',') + '\\₽',
+      exchangeRates: '1\\$ \\= ' + countRates.replace('.', ',') + '₽',
       countRates,
     };
   } catch (error) {
