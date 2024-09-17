@@ -25,11 +25,6 @@ async function updatePinnedMessage() {
   const pinnedMessageState = loadPinnedMessageState();
   const currentTime = new Date().getTime();
 
-  if (pinnedMessageState.lastCountRates == countRates) {
-    console.log('Курс не изменился обновлять нет смысла');
-    return null;
-  }
-
   if (
     pinnedMessageState?.timestamp &&
     isMessageExpired(pinnedMessageState.timestamp)
@@ -40,6 +35,9 @@ async function updatePinnedMessage() {
     } catch (error) {
       console.error('Удаление неудачно старого поста:', error);
     }
+  } else if (pinnedMessageState.lastCountRates == countRates) {
+    console.log('Курс не изменился обновлять нет смысла');
+    return null;
   }
 
   const exhcangeMessage = `Текущий курс ${exchangeRates} по цб [Яндекс конвертёр](https://ya.ru/search/?text=%D0%BA%D1%83%D1%80%D1%81+%D0%B4%D0%BE%D0%BB%D0%BB%D0%B0%D1%80%D0%B0+%D0%BA+%D1%80%D1%83%D0%B1%D0%BB%D1%8E)`;

@@ -19,6 +19,6 @@ export function loadPinnedMessageState() {
 export function isMessageExpired(timestamp) {
   const currentTime = new Date().getTime();
   const timeElapsed = currentTime - timestamp;
-  const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+  const twentyFourHours = 20 * 60 * 60 * 1000; // 24 hours in milliseconds
   return timeElapsed >= twentyFourHours;
 }
