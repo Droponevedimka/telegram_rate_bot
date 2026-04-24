@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram rate bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dropo
+Group=dropo
+WorkingDirectory=/home/dropo/telegram_rate_bot
+Environment=NODE_ENV=production
+EnvironmentFile=-/home/dropo/telegram_rate_bot/.env
+ExecStart=/usr/bin/node /home/dropo/telegram_rate_bot/server.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

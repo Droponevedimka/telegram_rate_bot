@@ -1,3 +1,12 @@
-npm i  установите зависимости
+npm i
 
-node server.js запустите сервер
+npm start
+
+Сервисные команды бота:
+/update_cur - ручное обновление курса для админов целевого чата.
+
+Systemd:
+1. sudo cp /home/dropo/telegram_rate_bot/telegram_rate_bot.service /etc/systemd/system/telegram_rate_bot.service
+2. sudo systemctl daemon-reload
+3. sudo systemctl enable --now telegram_rate_bot.service
+4. sudo systemctl status telegram_rate_bot.service

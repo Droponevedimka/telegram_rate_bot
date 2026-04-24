@@ -16,10 +16,7 @@ export const TELEGRAM_API_ROOT =
 export const TELEGRAM_REQUEST_TIMEOUT_MS = Number(
 	process.env.TELEGRAM_REQUEST_TIMEOUT_MS || 15000,
 );
-export const OPENAI_API_KEY = process.env.OPENAI_API_KEY_GENERAL;
 export const TARGET_CHAT_ID = process.env.TARGET_CHAT_ID;
-export const MESSAGE_DOLLAR_ID = process.env.DOLLAR_ID;
-export const MESSAGE_RUB_ID = process.env.RUB_ID;
 export const BOT_ADMIN_IDS = (process.env.BOT_ADMIN_IDS || "")
 	.split(",")
 	.map((value) => value.trim())
