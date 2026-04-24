@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import { PORT, TELEGRAM_TOKEN } from "./config.mjs";
 import { logger } from "./middlewares/logger.mjs";
 import { launchBot, handleUpdate } from "./services/telegramBotService.mjs";
+import { startExchangeRateScheduler } from "./services/exchangeRate.mjs";
 
 const app = express();
 
@@ -17,4 +18,5 @@ app.post(`/webhook/${TELEGRAM_TOKEN}`, (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   launchBot();
+  startExchangeRateScheduler();
 });
