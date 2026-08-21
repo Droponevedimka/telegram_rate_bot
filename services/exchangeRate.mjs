@@ -8,7 +8,6 @@ import {
 import {
   savePinnedMessageState,
   loadPinnedMessageState,
-  isMessageExpired,
 } from '../functions/stateLocalFille.mjs';
 import { createTelegramBot } from './telegramClient.mjs';
 
@@ -34,64 +33,47 @@ function buildExchangeMessage(rawRate) {
   return `Текущий курс ${formatExchangeRate(rawRate)} по цб [Яндекс конвертёр](https://ya.ru/search/?text=%D0%BA%D1%83%D1%80%D1%81+%D0%B4%D0%BE%D0%BB%D0%BB%D0%B0%D1%80%D0%B0+%D0%BA+%D1%80%D1%83%D0%B1%D0%BB%D1%8E+%D0%BA%D0%BE%D0%BD%D0%B2%D0%B5%D1%80%D1%82%D0%B5%D1%80&lr=213&src=suggest_B)`;
 }
 
+function getTelegramErrorDescription(error) {
+  return error?.response?.description || error?.message || String(error);
+}
+
 function isMissingMessageError(error) {
+  const description = getTelegramErrorDescription(error).toLowerCase();
   return (
     error?.response?.error_code === 400 &&
-    typeof error?.response?.description === 'string' &&
-    error.response.description.includes('message to edit not found')
+    (
+      description.includes('message to edit not found') ||
+      description.includes('message to pin not found') ||
+      description.includes('message not found') ||
+      description.includes('message_id_invalid')
+    )
   );
 }
 
-async function getPinnedMessageCandidates(savedMessageId) {
-  const messageIds = new Set();
-
-  if (savedMessageId) {
-    messageIds.add(savedMessageId);
-  }
-
-  try {
-    const chat = await bot.telegram.getChat(TARGET_CHAT_ID);
-    const pinnedMessageId = chat?.pinned_message?.message_id;
-
-    if (pinnedMessageId) {
-      messageIds.add(pinnedMessageId);
-    }
-  } catch (error) {
-    console.error('Error loading chat metadata before rate update:', error);
-  }
-
-  return [...messageIds];
+function isMessageNotModifiedError(error) {
+  return (
+    error?.response?.error_code === 400 &&
+    getTelegramErrorDescription(error).toLowerCase().includes('message is not modified')
+  );
 }
 
-async function cleanupPreviousRateMessages(savedMessageId) {
-  const deletedMessageIds = [];
-  const messageIds = await getPinnedMessageCandidates(savedMessageId);
-
-  for (const messageId of messageIds) {
-    try {
-      await bot.telegram.deleteMessage(TARGET_CHAT_ID, messageId);
-      deletedMessageIds.push(messageId);
-      console.log(`Deleted previous rate message ${messageId}.`);
-    } catch (error) {
-      console.error(`Error deleting previous rate message ${messageId}:`, error);
-    }
-  }
-
-  return deletedMessageIds;
+function logCompactError(prefix, error) {
+  console.error(`${prefix}: ${getTelegramErrorDescription(error)}`);
 }
 
-async function deletePinServiceMessage(serviceMessageId) {
-  if (!serviceMessageId) {
-    return false;
-  }
-
+async function getPinnedMessageStatus(telegram = bot.telegram, chatId = TARGET_CHAT_ID) {
   try {
-    await bot.telegram.deleteMessage(TARGET_CHAT_ID, serviceMessageId);
-    console.log(`Deleted pin service message ${serviceMessageId}.`);
-    return true;
+    const chat = await telegram.getChat(chatId);
+    return {
+      known: true,
+      messageId: chat?.pinned_message?.message_id || null,
+    };
   } catch (error) {
-    console.error(`Error deleting pin service message ${serviceMessageId}:`, error);
-    return false;
+    logCompactError('Error loading chat metadata', error);
+    return {
+      known: false,
+      messageId: null,
+    };
   }
 }
 
@@ -111,22 +93,13 @@ function scheduleNextCheck(delayMs) {
   );
 }
 
-async function deletePinnedMessage(messageId) {
-  if (!messageId) {
-    return;
-  }
-
-  try {
-    await bot.telegram.deleteMessage(TARGET_CHAT_ID, messageId);
-    console.log('Old message deleted.');
-  } catch (error) {
-    console.error('Error deleting old message:', error);
-  }
-}
-
-async function publishPinnedMessage(rawRate) {
+async function publishPinnedMessage(
+  rawRate,
+  telegram = bot.telegram,
+  chatId = TARGET_CHAT_ID
+) {
   const exchangeMessage = buildExchangeMessage(rawRate);
-  const message = await bot.telegram.sendMessage(TARGET_CHAT_ID, exchangeMessage, {
+  const message = await telegram.sendMessage(chatId, exchangeMessage, {
     parse_mode: 'MarkdownV2',
     disable_notification: true,
     link_preview_options: {
@@ -134,31 +107,115 @@ async function publishPinnedMessage(rawRate) {
     },
   });
 
-  await bot.telegram.pinChatMessage(TARGET_CHAT_ID, message.message_id, {
+  await telegram.pinChatMessage(chatId, message.message_id, {
     disable_notification: true,
   });
-
-  await deletePinServiceMessage(message.message_id + 1);
 
   return message.message_id;
 }
 
-async function editPinnedMessage(messageId, rawRate) {
+async function editOwnMessage(
+  messageId,
+  rawRate,
+  telegram = bot.telegram,
+  chatId = TARGET_CHAT_ID
+) {
   const exchangeMessage = buildExchangeMessage(rawRate);
 
-  await bot.telegram.editMessageText(
-    TARGET_CHAT_ID,
-    messageId,
-    null,
-    exchangeMessage,
-    {
-      parse_mode: 'MarkdownV2',
-      disable_notification: true,
-      link_preview_options: {
-        is_disabled: true,
-      },
+  try {
+    await telegram.editMessageText(
+      chatId,
+      messageId,
+      null,
+      exchangeMessage,
+      {
+        parse_mode: 'MarkdownV2',
+        disable_notification: true,
+        link_preview_options: {
+          is_disabled: true,
+        },
+      }
+    );
+  } catch (error) {
+    if (!isMessageNotModifiedError(error)) {
+      throw error;
     }
+  }
+}
+
+export async function reconcilePinnedMessage({
+  savedMessageId,
+  rawRate,
+  rateChanged,
+  telegram = bot.telegram,
+  chatId = TARGET_CHAT_ID,
+}) {
+  const pinnedStatus = await getPinnedMessageStatus(telegram, chatId);
+  const pinIsCurrent = (
+    pinnedStatus.known &&
+    savedMessageId &&
+    pinnedStatus.messageId === savedMessageId
   );
+
+  if (savedMessageId) {
+    try {
+      if (rateChanged || !pinIsCurrent) {
+        await editOwnMessage(savedMessageId, rawRate, telegram, chatId);
+      }
+
+      if (!pinIsCurrent) {
+        await telegram.pinChatMessage(chatId, savedMessageId, {
+          disable_notification: true,
+        });
+        return {
+          action: rateChanged ? 'updated' : 'repinned',
+          messageId: savedMessageId,
+          publishedAt: Date.now(),
+        };
+      }
+
+      return {
+        action: rateChanged ? 'updated' : 'unchanged',
+        messageId: savedMessageId,
+        publishedAt: rateChanged ? Date.now() : null,
+      };
+    } catch (error) {
+      if (!isMissingMessageError(error)) {
+        throw error;
+      }
+
+      console.warn(`Saved rate message ${savedMessageId} no longer exists; publishing a new one.`);
+    }
+  }
+
+  const messageId = await publishPinnedMessage(rawRate, telegram, chatId);
+  return {
+    action: savedMessageId ? 'recreated' : 'published',
+    messageId,
+    publishedAt: Date.now(),
+  };
+}
+
+async function recoverPinnedMessageFromCache(pinnedMessageState) {
+  if (typeof pinnedMessageState.lastRawRate !== 'number') {
+    return null;
+  }
+
+  const pinnedStatus = await getPinnedMessageStatus();
+
+  if (
+    pinnedStatus.known &&
+    pinnedMessageState.messageId &&
+    pinnedStatus.messageId === pinnedMessageState.messageId
+  ) {
+    return null;
+  }
+
+  return reconcilePinnedMessage({
+    savedMessageId: pinnedMessageState.messageId,
+    rawRate: pinnedMessageState.lastRawRate,
+    rateChanged: false,
+  });
 }
 
 export async function runExchangeRateCheck({ isScheduledRun = false } = {}) {
@@ -177,6 +234,7 @@ export async function runExchangeRateCheck({ isScheduledRun = false } = {}) {
 
   const result = {
     action: 'noop',
+    source: null,
     sourceDate: null,
     sourceTimestamp: null,
     lastModified: pinnedMessageState.lastModified || null,
@@ -196,122 +254,74 @@ export async function runExchangeRateCheck({ isScheduledRun = false } = {}) {
 
     nextCheckDelayMs = rateResponse.nextCheckDelayMs || DEFAULT_CHECK_DELAY_MS;
     result.nextCheckDelayMs = nextCheckDelayMs;
+    result.source = rateResponse.source || null;
     result.sourceDate = rateResponse.sourceDate || null;
     result.sourceTimestamp = rateResponse.sourceTimestamp || null;
     result.lastModified = rateResponse.lastModified || pinnedMessageState.lastModified || null;
 
-    const nextState = {
+    const rawRate = rateResponse.status === 304
+      ? pinnedMessageState.lastRawRate
+      : rateResponse.rawRate;
+
+    if (typeof rawRate !== 'number' || !Number.isFinite(rawRate)) {
+      throw new Error('Cannot update the pinned message without a valid exchange rate.');
+    }
+
+    const rateChanged = (
+      typeof pinnedMessageState.lastRawRate !== 'number' ||
+      Math.abs(rawRate - pinnedMessageState.lastRawRate) > Number.EPSILON
+    );
+    const pinResult = await reconcilePinnedMessage({
+      savedMessageId: pinnedMessageState.messageId,
+      rawRate,
+      rateChanged,
+    });
+
+    result.currentRate = rawRate;
+    result.messageId = pinResult.messageId;
+    result.action = (
+      rateResponse.status === 304 && pinResult.action === 'unchanged'
+        ? 'not_modified'
+        : pinResult.action
+    );
+
+    savePinnedMessageState({
       ...pinnedMessageState,
+      messageId: pinResult.messageId,
+      lastPublishedAt: pinResult.publishedAt || pinnedMessageState.lastPublishedAt,
+      lastRawRate: rawRate,
       lastModified: rateResponse.lastModified || pinnedMessageState.lastModified,
       lastCheckedAt: currentTime,
       nextCheckAt: currentTime + nextCheckDelayMs,
-    };
+    });
 
-    const shouldRotatePinnedMessage =
-      !pinnedMessageState.messageId || isMessageExpired(pinnedMessageState.lastPublishedAt);
-
-    if (rateResponse.status === 304) {
-      result.action = shouldRotatePinnedMessage ? 'rotated' : 'not_modified';
-
-      if (shouldRotatePinnedMessage) {
-        if (typeof pinnedMessageState.lastRawRate !== 'number') {
-          throw new Error('Cannot rotate pinned message without a cached exchange rate.');
-        }
-
-        result.deletedMessageIds = await cleanupPreviousRateMessages(
-          pinnedMessageState.messageId
-        );
-        const newMessageId = await publishPinnedMessage(pinnedMessageState.lastRawRate);
-        result.messageId = newMessageId;
-        result.currentRate = pinnedMessageState.lastRawRate;
-
-        savePinnedMessageState({
-          ...nextState,
-          messageId: newMessageId,
-          lastPublishedAt: currentTime,
-          lastRawRate: pinnedMessageState.lastRawRate,
-        });
-        console.log('Pinned message rotated without a CBR content change.');
-      } else {
-        savePinnedMessageState(nextState);
-        result.currentRate = pinnedMessageState.lastRawRate;
-        console.log('CBR data not modified; pinned message left unchanged.');
-      }
-
-      return result;
-    }
-
-    const rateChanged =
-      typeof pinnedMessageState.lastRawRate !== 'number' ||
-      Math.abs(rateResponse.rawRate - pinnedMessageState.lastRawRate) > Number.EPSILON;
-
-    result.currentRate = rateResponse.rawRate;
-
-    if (shouldRotatePinnedMessage) {
-      result.action = 'rotated';
-      result.deletedMessageIds = await cleanupPreviousRateMessages(
-        pinnedMessageState.messageId
-      );
-      const newMessageId = await publishPinnedMessage(rateResponse.rawRate);
-      result.messageId = newMessageId;
-
-      savePinnedMessageState({
-        ...nextState,
-        messageId: newMessageId,
-        lastPublishedAt: currentTime,
-        lastRawRate: rateResponse.rawRate,
-      });
-      console.log('Pinned message published and pinned.');
-    } else if (rateChanged) {
-      result.action = 'updated';
-      try {
-        result.deletedMessageIds = await cleanupPreviousRateMessages(
-          pinnedMessageState.messageId
-        );
-        const newMessageId = await publishPinnedMessage(rateResponse.rawRate);
-
-        savePinnedMessageState({
-          ...nextState,
-          messageId: newMessageId,
-          lastPublishedAt: currentTime,
-          lastRawRate: rateResponse.rawRate,
-        });
-        result.messageId = newMessageId;
-        console.log('Pinned message replaced after a CBR change.');
-      } catch (error) {
-        if (!isMissingMessageError(error)) {
-          throw error;
-        }
-
-        result.deletedMessageIds = await cleanupPreviousRateMessages(
-          pinnedMessageState.messageId
-        );
-        const newMessageId = await publishPinnedMessage(rateResponse.rawRate);
-
-        savePinnedMessageState({
-          ...nextState,
-          messageId: newMessageId,
-          lastPublishedAt: currentTime,
-          lastRawRate: rateResponse.rawRate,
-        });
-        result.messageId = newMessageId;
-        console.log('Pinned message was missing, so a new one was published and pinned.');
-      }
-    } else {
-      result.action = 'unchanged';
-      savePinnedMessageState({
-        ...nextState,
-        lastRawRate: rateResponse.rawRate,
-      });
-      console.log('CBR returned 200, but the USD/RUB value did not change.');
-    }
-
+    console.log(
+      `Exchange rate check succeeded via ${result.source || 'unknown source'}; action=${result.action}.`
+    );
     return result;
   } catch (error) {
-    console.error('Exchange rate check failed:', error);
-
+    const errorMessage = error?.message || String(error);
+    console.error(`Exchange rate check failed: ${errorMessage}`);
     result.action = 'failed';
-    result.errorMessage = error.message;
+    result.errorMessage = errorMessage;
+
+    try {
+      const recovery = await recoverPinnedMessageFromCache(pinnedMessageState);
+
+      if (recovery) {
+        result.action = 'recovered_cached';
+        result.messageId = recovery.messageId;
+        savePinnedMessageState({
+          ...pinnedMessageState,
+          messageId: recovery.messageId,
+          lastPublishedAt: recovery.publishedAt || pinnedMessageState.lastPublishedAt,
+          nextCheckAt: currentTime + nextCheckDelayMs,
+        });
+        console.warn('Restored the pinned message from the last cached exchange rate.');
+      }
+    } catch (recoveryError) {
+      logCompactError('Cached pin recovery failed', recoveryError);
+    }
 
     return result;
   } finally {

@@ -34,8 +34,11 @@ function buildManualUpdateReply(result) {
   }
 
   const actionMap = {
-    updated: "Курс обновлён, опубликован новый пост.",
-    rotated: "Курс перепубликован новым постом.",
+    updated: "Курс обновлён в закреплённом сообщении.",
+    published: "Курс опубликован и закреплён.",
+    recreated: "Отсутствующее сообщение курса создано заново и закреплено.",
+    repinned: "Сообщение курса восстановлено и закреплено повторно.",
+    recovered_cached: "Источник недоступен, закрепление восстановлено из последнего сохранённого курса.",
     unchanged: "API вернул актуальные данные, но курс не изменился.",
     not_modified: "API не изменился, публикация не потребовалась.",
     noop: "Изменений не обнаружено.",
@@ -43,11 +46,12 @@ function buildManualUpdateReply(result) {
 
   return [
     actionMap[result.action] || "Обновление выполнено.",
+    `Источник: ${result.source || "кэш"}`,
     `Дата курса API: ${sourceDate}`,
     `Last-Modified: ${result.lastModified || "нет данных"}`,
     `Курс до: ${previousRate}`,
     `Курс после: ${currentRate}`,
-    `Удалены сообщения: ${result.deletedMessageIds?.length ? result.deletedMessageIds.join(", ") : "нет"}`,
+    ...(result.errorMessage ? [`Ошибка источника: ${result.errorMessage}`] : []),
   ].join("\n");
 }
 
